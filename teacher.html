@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EduAccess – Преподаватель</title>
+    <style>
+        * { box-sizing: border-box; }
+        body { font-family: system-ui, 'Segoe UI', Roboto, sans-serif; background: #f1f5f9; margin: 0; padding: 24px; color: #0f172a; }
+        .container { max-width: 1300px; margin: 0 auto; }
+        h1 { font-size: 1.8rem; }
+        .card { background: white; border-radius: 24px; box-shadow: 0 8px 20px rgba(0,0,0,0.05); padding: 20px 28px; margin-bottom: 28px; }
+        .card h2 { margin-top: 0; font-size: 1.4rem; border-left: 5px solid #10b981; padding-left: 16px; }
+        .flex-row { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-end; margin-bottom: 16px; }
+        .input-group { flex: 1; min-width: 180px; }
+        label { display: block; font-weight: 600; font-size: 0.8rem; margin-bottom: 6px; }
+        input, select, button { padding: 10px 14px; border-radius: 14px; border: 1px solid #cbd5e1; font-size: 0.9rem; }
+        input, select { width: 100%; }
+        button { background: #10b981; color: white; border: none; cursor: pointer; font-weight: 600; }
+        button:hover { background: #059669; }
+        button.danger { background: #ef4444; }
+        button.danger:hover { background: #dc2626; }
+        button.secondary { background: #6c757d; }
+        .status { background: #f1f5f9; padding: 12px; border-radius: 16px; font-family: monospace; margin-top: 12px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 16px; }
+        th, td { text-align: left; padding: 10px; border-bottom: 1px solid #e2e8f0; }
+        th { background: #f8fafc; }
+        .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 20px; }
+        hr { margin: 20px 0; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>📚 EduAccess – Панель преподавателя</h1>
+    <p>Создавайте курсы – они автоматически добавятся в Airtable.</p>
+
+    <div class="card">
+        <div class="flex-row">
+            <button id="connectBtn" style="background:#10b981;">🦊 Подключить кошелёк</button>
+            <button id="initBtn" disabled>📚 Загрузить мои курсы</button>
+        </div>
+        <div id="walletStatus" class="status">⚠️ Кошелёк не подключён</div>
+        <div id="contractStatus" class="status"></div>
+    </div>
+
+    <div class="card" id="teacherCard" style="display: none;">
+        <div class="grid-2">
+            <div>
+                <h2>➕ Создать курс</h2>
+                <div class="input-group"><label>Название</label><input id="createTitle" placeholder="Например: Solidity"></div>
+                <div class="input-group"><label>Цена (wei)</label><input id="createPrice" type="number" value="1000000000000000000"></div>
+                <div class="input-group"><label>Макс. студентов (0 = без лимита)</label><input id="createMax" type="number" value="0"></div>
+                <div class="input-group"><label>URI метаданных</label><input id="createURI" placeholder="ipfs://test"></div>
+                <button id="createCourseBtn">Создать курс</button>
+            </div>
+            <div>
+                <h2>✏️ Обновить курс</h2>
+                <div class="input-group"><label>ID курса</label><input id="updateId" type="number"></div>
+                <div class="input-group"><label>Название</label><input id="updateTitle"></div>
+                <div class="input-group"><label>Цена (wei)</label><input id="updatePrice" type="number"></div>
+                <div class="input-group"><label>Макс. студентов</label><input id="updateMax" type="number"></div>
+                <div class="input-group"><label>URI метаданных</label><input id="updateURI"></div>
+                <div class="input-group"><label>Активен?</label><select id="updateActive"><option value="true">Да</option><option value="false">Нет</option></select></div>
+                <button id="updateCourseBtn">Обновить</button>
+            </div>
+            <div>
+                <h2>🔒 Деактивировать курс</h2>
+                <div class="input-group"><label>ID курса</label><input id="deactivateId" type="number"></div>
+                <button id="deactivateCourseBtn" class="danger">Деактивировать</button>
+            </div>
+            <div>
+                <h2>🏆 Выдать достижение студенту</h2>
+                <div class="input-group"><label>Адрес студента</label><input id="studentAddr" placeholder="0x..."></div>
+                <div class="input-group"><label>ID курса</label><input id="achCourseId" type="number"></div>
+                <div class="input-group"><label>Название достижения</label><input id="achTitle" placeholder="Отличник"></div>
+                <button id="issueAchievementBtn">Выдать достижение</button>
+            </div>
+        </div>
+        <hr>
+        <h2>📊 Мои курсы</h2>
+        <div class="flex-row">
+            <button id="refreshStatsBtn" class="secondary">🔄 Обновить статистику (из Airtable)</button>
+            <button id="syncFromContractBtn" class="secondary">🔄 Синхронизировать из контракта → Airtable</button>
+        </div>
+        <div id="coursesStats"></div>
+    </div>
+
+    <div class="card" id="txCard" style="display: none;">
+        <h2>📋 Последняя транзакция</h2>
+        <div id="txHashDisplay" class="mono" style="background:#eef2ff; padding:10px; border-radius:14px;">—</div>
+        <div id="txStatus" class="status">—</div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
+<script>
+    const CONTRACT_ADDRESS = '0x210c3CB3e749125f14841c024a1f2702D5DdF3E2';
+    const AIRTABLE_API_KEY = 'patpZ6jgZUTEW3K1i.af7ec9c8fcb986b62731cf1eeb614ca90a6c98cda8ba03b44e621ff676d1ac57';
+    const AIRTABLE_BASE_ID = 'appU61kDaWbBknIqU';
+    const COURSES_TABLE = 'Courses';
+    const RULES_TABLE = 'Rules';
+
+    let provider, signer, contract, userAddress;
+
+    const connectBtn = document.getElementById('connectBtn');
+    const initBtn = document.getElementById('initBtn');
+    const walletStatusDiv = document.getElementById('walletStatus');
+    const contractStatusDiv = document.getElementById('contractStatus');
+    const teacherCard = document.getElementById('teacherCard');
+    const txCard = document.getElementById('txCard');
+    const txHashDisplay = document.getElementById('txHashDisplay');
+    const txStatusDiv = document.getElementById('txStatus');
+    const coursesStatsDiv = document.getElementById('coursesStats');
+
+    const teacherABI = [
+        "function createCourse(string,uint256,uint256,string) returns (uint256)",
+        "function updateCourse(uint256,string,uint256,uint256,string,bool)",
+        "function deactivateCourse(uint256)",
+        "function issueAchievement(address,uint256,string)",
+        "function getCourseStudents(uint256) view returns (address[], uint256[], uint256[])",
+        "function getStudentNFTs(address) view returns (uint256[], uint256[], string[], uint256[])",
+        "function getFABalance(address) view returns (uint256)",
+        "function hasRole(bytes32,address) view returns (bool)",
+        "function TEACHER_ROLE() view returns (bytes32)",
+        "function nextCourseId() view returns (uint256)",
+        "function courseTeacher(uint256) view returns (address)",
+        "function courseTitle(uint256) view returns (string)",
+        "function coursePrice(uint256) view returns (uint256)",
+        "function courseMaxStudents(uint256) view returns (uint256)",
+        "function courseEnrolled(uint256) view returns (uint256)",
+        "function courseActive(uint256) view returns (bool)"
+    ];
+
+    // Загрузка курсов преподавателя из Airtable (по teacher)
+    async function loadMyCoursesFromAirtable() {
+        if (!userAddress) return [];
+        try {
+            const url = `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${COURSES_TABLE}?filterByFormula=({teacher}="${userAddress}")`;
+            const resp = await fetch(url, { headers: { Authorization: `Bearer ${AIRTABLE_API_KEY}` } });
+            const data = await resp.json();
+            if (!data.records) return [];
+            return data.records.map(record => ({
+                id: record.fields.courseId,
+                title: record.fields.title,
+                price: record.fields.price,
+                max: record.fields.maxStudents || 0,
+                enrolled: record.fields.enrolled || 0,
+                active: record.fields.active === true
+            }));
+        } catch(e) { console.warn(e); return []; }
+    }
+
+    // Отображение статистики (читаем из Airtable)
+    async function loadTeacherStats() {
+        if (!contract || !userAddress) return;
+        try {
+            const myCourses = await loadMyCoursesFromAirtable();
+            if (myCourses.length === 0) {
+                coursesStatsDiv.innerHTML = '<p>У вас пока нет курсов в Airtable. Создайте курс или нажмите «Синхронизировать из контракта».</p>';
+                return;
+            }
+            // Правила приоритета (для статистики)
+            let rules = { minBalance: "1000000000000000000", requiredNftId: "" };
+            try {
+                const url = `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${RULES_TABLE}?maxRecords=1`;
+                const resp = await fetch(url, { headers: { Authorization: `Bearer ${AIRTABLE_API_KEY}` } });
+                const data = await resp.json();
+                if (data.records && data.records.length > 0) {
+                    const f = data.records[0].fields;
+                    rules = { minBalance: f.minBalance || "1000000000000000000", requiredNftId: f.requiredNftId || "" };
+                }
+            } catch(e) {}
+            let html = `</table><thead><tr><th>ID</th><th>Название</th><th>Цена (wei)</th><th>Записано</th><th>Лимит</th><th>Приоритетных*</th><th>Обычных</th></tr></thead><tbody>`;
+            for (let c of myCourses) {
+                let students = [];
+                try {
+                    const data = await contract.getCourseStudents(c.id);
+                    students = data[0];
+                } catch(e) { console.warn(`Нет данных студентов курса ${c.id}`, e); }
+                let priority = 0;
+                for (let s of students) {
+                    const bal = await contract.getFABalance(s);
+                    let has = bal.gte(ethers.BigNumber.from(rules.minBalance));
+                    if (!has && rules.requiredNftId) {
+                        const nfts = await contract.getStudentNFTs(s);
+                        if (nfts[0].includes(parseInt(rules.requiredNftId))) has = true;
+                    }
+                    if (has) priority++;
+                }
+                html += `<tr>
+                    <td>${c.id}</td>
+                    <td>${c.title}</td>
+                    <td>${c.price}</td>
+                    <td>${students.length}</td>
+                    <td>${c.max === 0 ? '∞' : c.max}</td>
+                    <td>${priority}</td>
+                    <td>${students.length - priority}</td>
+                </tr>`;
+            }
+            html += `</tbody></table><p><small>* Приоритет по правилам администратора (Airtable).</small></p>`;
+            coursesStatsDiv.innerHTML = html;
+        } catch (err) {
+            coursesStatsDiv.innerHTML = `<p style="color:red;">Ошибка: ${err.message}</p>`;
+        }
+    }
+
+    // Добавление курса в Airtable
+    async function addCourseToAirtable(courseId, teacher, title, price, maxStudents, metadataURI) {
+        const url = `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${COURSES_TABLE}`;
+        const payload = {
+            records: [{
+                fields: {
+                    courseId: courseId,
+                    teacher: teacher,
+                    title: title,
+                    price: price,
+                    maxStudents: maxStudents,
+                    enrolled: 0,
+                    metadataURI: metadataURI,
+                    active: true
+                }
+            }]
+        };
+        console.log("Отправка в Airtable:", JSON.stringify(payload));
+        const resp = await fetch(url, {
+            method: 'POST',
+            headers: {
+                Authorization: `Bearer ${AIRTABLE_API_KEY}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+        });
+        if (!resp.ok) {
+            const errorText = await resp.text();
+            throw new Error(`Airtable ответил ${resp.status}: ${errorText}`);
+        }
+        return await resp.json();
+    }
+
+    // Обновление курса в Airtable
+    async function updateCourseInAirtable(courseId, title, price, maxStudents, metadataURI, active) {
+        const searchUrl = `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${COURSES_TABLE}?filterByFormula={courseId}=${courseId}`;
+        const existing = await fetch(searchUrl, { headers: { Authorization: `Bearer ${AIRTABLE_API_KEY}` } });
+        const existingData = await existing.json();
+        if (!existingData.records || existingData.records.length === 0) {
+            throw new Error(`Курс ${courseId} не найден в Airtable для обновления`);
+        }
+        const recordId = existingData.records[0].id;
+        const fields = {};
+        if (title !== undefined) fields.title = title;
+        if (price !== undefined) fields.price = price;
+        if (maxStudents !== undefined) fields.maxStudents = maxStudents;
+        if (metadataURI !== undefined) fields.metadataURI = metadataURI;
+        if (active !== undefined) fields.active = active;
+        const resp = await fetch(`https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${COURSES_TABLE}/${recordId}`, {
+            method: 'PATCH',
+            headers: { Authorization: `Bearer ${AIRTABLE_API_KEY}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fields })
+        });
+        if (!resp.ok) throw new Error(`Ошибка обновления Airtable: ${resp.status}`);
+    }
+
+    // Отправка транзакции
+    async function sendTx(action, params, successMsg, onSuccess) {
+        if (!contract) throw new Error('Контракт не инициализирован');
+        setStatus(txStatusDiv, '⏳ Отправка...');
+        txHashDisplay.textContent = 'Ожидание подписи...';
+        txCard.style.display = 'block';
+        const tx = await action(...params);
+        txHashDisplay.textContent = tx.hash;
+        setStatus(txStatusDiv, `⏳ Отправлена. Ожидание подтверждения...`);
+        const receipt = await tx.wait();
+        if (receipt.status === 1) {
+            setStatus(txStatusDiv, `✅ ${successMsg} Блок: ${receipt.blockNumber}`);
+            if (onSuccess) await onSuccess(receipt);
+            return receipt;
+        } else throw new Error('Транзакция не выполнена');
+    }
+
+    function setStatus(div, msg, isErr = false) {
+        div.innerHTML = msg;
+        div.style.color = isErr ? '#b91c1c' : '#1e293b';
+    }
+
+    // Подключение кошелька
+    connectBtn.onclick = async () => {
+        if (!window.ethereum) { walletStatusDiv.innerHTML = '❌ MetaMask не найден'; return; }
+        try {
+            const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+            userAddress = accounts[0];
+            provider = new ethers.providers.Web3Provider(window.ethereum);
+            signer = provider.getSigner();
+            walletStatusDiv.innerHTML = `✅ Подключён: ${userAddress.slice(0,6)}...${userAddress.slice(-4)}`;
+            initBtn.disabled = false;
+        } catch (err) { walletStatusDiv.innerHTML = `❌ ${err.message}`; }
+    };
+
+    initBtn.onclick = async () => {
+        if (!provider) { contractStatusDiv.innerHTML = '❌ Сначала подключите кошелёк'; return; }
+        try {
+            contract = new ethers.Contract(CONTRACT_ADDRESS, teacherABI, signer);
+            const teacherRole = await contract.TEACHER_ROLE();
+            const isTeacher = await contract.hasRole(teacherRole, userAddress);
+            if (!isTeacher) {
+                contractStatusDiv.innerHTML = '⚠️ Ваш кошелёк не имеет TEACHER_ROLE. Обратитесь к администратору.';
+                teacherCard.style.display = 'none';
+                return;
+            }
+            contractStatusDiv.innerHTML = '✅ Контракт загружен. Вы преподаватель.';
+            teacherCard.style.display = 'block';
+            txCard.style.display = 'block';
+            await loadTeacherStats();
+        } catch (err) { contractStatusDiv.innerHTML = `❌ ${err.message}`; }
+    };
+
+    // Создание курса
+    document.getElementById('createCourseBtn').onclick = async () => {
+        const title = document.getElementById('createTitle').value.trim();
+        const price = document.getElementById('createPrice').value;
+        const max = document.getElementById('createMax').value;
+        const uri = document.getElementById('createURI').value.trim();
+        if (!title || !uri) { alert('Заполните название и URI'); return; }
+        try {
+            const beforeId = await contract.nextCourseId();
+            await sendTx(contract.createCourse, [title, price, max, uri], `Курс "${title}" создан`, async () => {
+                const newId = beforeId;
+                alert(`🎉 Курс "${title}" создан! ID курса: ${newId}`);
+                // Автоматически добавляем в Airtable
+                try {
+                    await addCourseToAirtable(newId, userAddress, title, price, max, uri);
+                    alert(`Курс успешно добавлен в Airtable.`);
+                } catch (err) {
+                    console.error("Ошибка добавления в Airtable:", err);
+                    alert(`Курс создан в блокчейне, но НЕ добавлен в Airtable: ${err.message}\nВы можете добавить вручную или нажать кнопку синхронизации.`);
+                }
+                await loadTeacherStats();
+            });
+        } catch (err) { setStatus(txStatusDiv, `❌ ${err.message}`, true); }
+    };
+
+    // Обновление курса
+    document.getElementById('updateCourseBtn').onclick = async () => {
+        const id = document.getElementById('updateId').value;
+        const title = document.getElementById('updateTitle').value.trim();
+        const price = document.getElementById('updatePrice').value;
+        const max = document.getElementById('updateMax').value;
+        const uri = document.getElementById('updateURI').value.trim();
+        const active = document.getElementById('updateActive').value === 'true';
+        if (!id || !title || !uri) { alert('Заполните ID, название и URI'); return; }
+        try {
+            await sendTx(contract.updateCourse, [id, title, price, max, uri, active], `Курс ${id} обновлён`);
+            await updateCourseInAirtable(id, title, price, max, uri, active);
+            await loadTeacherStats();
+        } catch (err) { setStatus(txStatusDiv, `❌ ${err.message}`, true); }
+    };
+
+    document.getElementById('deactivateCourseBtn').onclick = async () => {
+        const id = document.getElementById('deactivateId').value;
+        if (!id) { alert('Введите ID курса'); return; }
+        try {
+            await sendTx(contract.deactivateCourse, [id], `Курс ${id} деактивирован`);
+            await updateCourseInAirtable(id, undefined, undefined, undefined, undefined, false);
+            await loadTeacherStats();
+        } catch (err) { setStatus(txStatusDiv, `❌ ${err.message}`, true); }
+    };
+
+    document.getElementById('issueAchievementBtn').onclick = async () => {
+        const student = document.getElementById('studentAddr').value.trim();
+        const cId = document.getElementById('achCourseId').value;
+        const title = document.getElementById('achTitle').value.trim();
+        if (!ethers.utils.isAddress(student)) { alert('Некорректный адрес'); return; }
+        if (!cId || !title) { alert('Заполните ID курса и название достижения'); return; }
+        try {
+            await sendTx(contract.issueAchievement, [student, cId, title], `Достижение "${title}" выдано`);
+        } catch (err) { setStatus(txStatusDiv, `❌ ${err.message}`, true); }
+    };
+
+    // Принудительная синхронизация из контракта (если view-функции работают)
+    document.getElementById('syncFromContractBtn').onclick = async () => {
+        if (!contract || !userAddress) return;
+        coursesStatsDiv.innerHTML = '<p>Синхронизация... (если контракт не отвечает, нажмите F12 для ошибки)</p>';
+        try {
+            const total = await contract.nextCourseId();
+            let synced = 0;
+            for (let i = 1; i < total; i++) {
+                try {
+                    const teacher = await contract.courseTeacher(i);
+                    if (teacher.toLowerCase() === userAddress.toLowerCase()) {
+                        const title = await contract.courseTitle(i);
+                        const price = await contract.coursePrice(i);
+                        const max = await contract.courseMaxStudents(i);
+                        const uri = await contract.courseMetadataURI(i);
+                        const active = await contract.courseActive(i);
+                        // Добавляем/обновляем в Airtable
+                        await addCourseToAirtable(i, teacher, title, price, max, uri);
+                        synced++;
+                    }
+                } catch(e) { console.warn(`Курс ${i} не загружен`, e); }
+            }
+            alert(`Синхронизировано ${synced} курсов.`);
+            await loadTeacherStats();
+        } catch (err) {
+            coursesStatsDiv.innerHTML = `<p style="color:red;">Ошибка синхронизации: ${err.message}. Возможно, view-функции контракта недоступны. Добавляйте курсы вручную через Airtable или поправьте контракт.</p>`;
+        }
+    };
+
+    document.getElementById('refreshStatsBtn').onclick = async () => { await loadTeacherStats(); };
+    if (window.ethereum) window.ethereum.on('accountsChanged', () => location.reload());
+</script>
+</body>
+</html>
