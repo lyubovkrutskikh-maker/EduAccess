@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EduAccess – Студент</title>
+    <style>
+        * { box-sizing: border-box; }
+        body { font-family: system-ui, 'Segoe UI', Roboto, sans-serif; background: #f5f7fb; margin: 0; padding: 24px; color: #1e293b; }
+        .container { max-width: 1400px; margin: 0 auto; }
+        h1 { font-size: 1.8rem; margin-bottom: 0.25rem; }
+        .card { background: white; border-radius: 20px; box-shadow: 0 8px 20px rgba(0,0,0,0.05); padding: 20px 24px; margin-bottom: 28px; }
+        .card h2 { margin-top: 0; font-size: 1.4rem; border-left: 5px solid #3b82f6; padding-left: 16px; }
+        .flex-row { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-end; margin-bottom: 16px; }
+        button { padding: 10px 14px; border-radius: 12px; border: none; font-size: 0.9rem; font-weight: 600; cursor: pointer; }
+        button.primary { background: #3b82f6; color: white; }
+        button.secondary { background: #10b981; color: white; }
+        .status { background: #f1f5f9; padding: 12px 16px; border-radius: 16px; font-family: monospace; font-size: 0.85rem; margin-top: 12px; }
+        .mono { font-family: monospace; word-break: break-all; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { text-align: left; padding: 12px 8px; border-bottom: 1px solid #e2e8f0; }
+        th { background: #f8fafc; }
+        select, input { padding: 8px 12px; border-radius: 12px; border: 1px solid #cbd5e1; width: 100%; }
+        .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>🎓 EduAccess – Студент</h1>
+    <div class="card">
+        <div class="flex-row">
+            <button id="connectBtn" class="primary">🦊 Подключить кошелёк</button>
+            <button id="loadCoursesBtn" class="primary" disabled>📚 Загрузить курсы</button>
+        </div>
+        <div id="walletStatus" class="status">⚠️ Кошелёк не подключён</div>
+    </div>
+    <div id="infoCard" class="card" style="display:none;">
+        <h2>👤 Мои данные</h2>
+        <div>💰 Баланс FA: <span id="faBalance">0</span> wei</div>
+        <div>🎓 Ваши курсы (ID): <span id="myCourses">—</span></div>
+        <button id="refreshBtn" class="secondary">Обновить</button>
+    </div>
+    <div id="rulesCard" class="card" style="display:none;">
+        <h2>⚙️ Правило приоритета</h2>
+        <div id="rulesDisplay" class="status"></div>
+    </div>
+    <div id="coursesCard" class="card" style="display:none;">
+        <h2>📖 Активные курсы</h2>
+        <div id="coursesList"></div>
+    </div>
+    <div id="txCard" class="card" style="display:none;">
+        <h2>📋 Последняя транзакция</h2>
+        <div id="txHash" class="mono status">—</div>
+        <div id="txStatus" class="status">—</div>
+    </div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
+<script>
+    const CONTRACT_ADDRESS = '0xE70b78Cbe587b7e099C1fC061C090Fced31AeCeb';
+    let provider, signer, contract, userAddress;
+    const abi = [
+        "function getFABalance(address) view returns (uint256)",
+        "function getStudentCourseIds(address) view returns (uint256[])",
+        "function getEnrollment(address,uint256) view returns (uint256,uint256)",
+        "function checkAffordability(address,uint256) view returns (bool,uint256,uint256,uint256)",
+        "function enrollInCourse(uint256) external payable",
+        "function isEnrolled(address,uint256) view returns (bool)",
+        "function nextCourseId() view returns (uint256)",
+        "function courseActive(uint256) view returns (bool)",
+        "function courseTitle(uint256) view returns (string)",
+        "function coursePrice(uint256) view returns (uint256)",
+        "function courseMaxStudents(uint256) view returns (uint256)",
+        "function courseEnrolled(uint256) view returns (uint256)",
+        "function courseTeacher(uint256) view returns (address)",
+        "function minBalance() view returns (uint256)"
+    ];
+    async function init() {
+        if (!window.ethereum) return alert('MetaMask не установлен');
+        const accounts = await ethereum.request({ method: 'eth_requestAccounts' });
+        userAddress = accounts[0];
+        provider = new ethers.providers.Web3Provider(window.ethereum);
+        signer = provider.getSigner();
+        contract = new ethers.Contract(CONTRACT_ADDRESS, abi, signer);
+        document.getElementById('walletStatus').innerHTML = `✅ Подключён: ${userAddress.slice(0,6)}...${userAddress.slice(-4)}`;
+        document.getElementById('loadCoursesBtn').disabled = false;
+        await refresh();
+    }
+    async function refresh() {
+        if (!contract) return;
+        const balance = await contract.getFABalance(userAddress);
+        document.getElementById('faBalance').innerText = balance.toString();
+        const minBal = await contract.minBalance();
+        document.getElementById('rulesDisplay').innerHTML = `Ранний доступ, если баланс ≥ ${minBal} wei`;
+        document.getElementById('infoCard').style.display = 'block';
+        document.getElementById('rulesCard').style.display = 'block';
+        document.getElementById('coursesCard').style.display = 'block';
+        const total = await contract.nextCourseId();
+        let courses = [];
+        for (let i = 1; i < total; i++) {
+            const active = await contract.courseActive(i);
+            if (active) {
+                const title = await contract.courseTitle(i);
+                const price = await contract.coursePrice(i);
+                const max = await contract.courseMaxStudents(i);
+                const enrolled = await contract.courseEnrolled(i);
+                courses.push({ id: i, title, price, max, enrolled });
+            }
+        }
+        if (courses.length === 0) {
+            document.getElementById('coursesList').innerHTML = '<p>Нет активных курсов</p>';
+            return;
+        }
+        let html = `<table><thead><tr><th>ID</th><th>Название</th><th>Цена (wei)</th><th>Записано/Лимит</th><th>Действие</th></tr></thead><tbody>`;
+        for (let c of courses) {
+            const enrolledAlready = await contract.isEnrolled(userAddress, c.id);
+            const canEnroll = (balance >= minBal) && !enrolledAlready && (c.max === 0 || c.enrolled < c.max);
+            html += `<tr>
+                <td>${c.id}</td>
+                <td>${c.title}</td>
+                <td>${c.price}</td>
+                <td>${c.enrolled} / ${c.max===0?'∞':c.max}</td>
+                <td><button class="enroll" data-id="${c.id}" data-price="${c.price}" ${!canEnroll ? 'disabled' : ''}>${enrolledAlready ? 'Уже записан' : 'Записаться'}</button></td>
+            </tr>`;
+        }
+        html += `</tbody></table>`;
+        document.getElementById('coursesList').innerHTML = html;
+        document.querySelectorAll('.enroll').forEach(btn => btn.onclick = async () => {
+            const id = btn.dataset.id, price = btn.dataset.price;
+            btn.disabled = true;
+            try {
+                const tx = await contract.enrollInCourse(id, { value: price, gasLimit: 300000 });
+                document.getElementById('txHash').innerHTML = tx.hash;
+                document.getElementById('txCard').style.display = 'block';
+                await tx.wait();
+                document.getElementById('txStatus').innerHTML = '✅ Запись успешна!';
+                await refresh();
+            } catch(e) { alert('Ошибка: '+e.message); btn.disabled = false; }
+        });
+        const myIds = await contract.getStudentCourseIds(userAddress);
+        document.getElementById('myCourses').innerText = myIds.join(', ') || '—';
+    }
+    document.getElementById('connectBtn').onclick = init;
+    document.getElementById('loadCoursesBtn').onclick = refresh;
+    document.getElementById('refreshBtn').onclick = refresh;
+</script>
+</body>
+</html>

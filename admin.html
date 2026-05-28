@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EduAccess – Администратор</title>
+    <style>
+        * { box-sizing: border-box; }
+        body { font-family: system-ui, 'Segoe UI', Roboto, sans-serif; background: #f1f5f9; margin: 0; padding: 24px; color: #0f172a; }
+        .container { max-width: 1000px; margin: 0 auto; }
+        .card { background: white; border-radius: 24px; padding: 20px 28px; margin-bottom: 28px; }
+        .card h2 { border-left: 5px solid #3b82f6; padding-left: 16px; }
+        .flex-row { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-end; margin-bottom: 16px; }
+        input, button { padding: 10px 14px; border-radius: 14px; border: 1px solid #cbd5e1; }
+        button { background: #3b82f6; color: white; border: none; cursor: pointer; }
+        button.danger { background: #ef4444; }
+        .status { background: #f1f5f9; padding: 12px; border-radius: 16px; font-family: monospace; margin-top: 12px; }
+        .mono { font-family: monospace; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>🔧 Администратор</h1>
+    <div class="card">
+        <div class="flex-row">
+            <button id="connectBtn">🦊 Подключить кошелёк</button>
+            <button id="initBtn" disabled>Инициализировать</button>
+        </div>
+        <div id="walletStatus" class="status">⚠️ Не подключён</div>
+        <div id="contractStatus" class="status"></div>
+    </div>
+    <div id="adminCard" class="card" style="display:none;">
+        <h2>👑 Управление учителями</h2>
+        <div class="flex-row">
+            <input id="teacherAddr" placeholder="0x...">
+            <button id="grantBtn">Назначить учителем</button>
+            <button id="revokeBtn" class="danger">Отозвать роль</button>
+        </div>
+        <div id="roleStatus" class="status"></div>
+
+        <h2>⚙️ Правило приоритета</h2>
+        <div class="flex-row">
+            <input id="minBalance" placeholder="Минимальный баланс (wei)">
+            <button id="setBalanceBtn">Установить</button>
+        </div>
+        <div id="ruleStatus" class="status"></div>
+
+        <h2>⚠️ Принудительная деактивация курса</h2>
+        <div class="flex-row">
+            <input id="forceId" type="number" placeholder="ID курса">
+            <button id="forceDeactivateBtn" class="danger">Деактивировать</button>
+        </div>
+        <div id="forceStatus" class="status"></div>
+    </div>
+    <div id="txCard" class="card" style="display:none;">
+        <h2>Транзакция</h2>
+        <div id="txHash" class="mono status">—</div>
+        <div id="txStatus" class="status">—</div>
+    </div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
+<script>
+    const CONTRACT_ADDRESS = '0xE70b78Cbe587b7e099C1fC061C090Fced31AeCeb';
+    let provider, signer, contract, userAddress;
+    const abi = [
+        "function grantTeacher(address)",
+        "function revokeTeacher(address)",
+        "function setMinBalance(uint256)",
+        "function forceDeactivate(uint256)",
+        "function hasRole(bytes32,address) view returns (bool)",
+        "function DEFAULT_ADMIN_ROLE() view returns (bytes32)",
+        "function minBalance() view returns (uint256)"
+    ];
+    async function init() {
+        if (!window.ethereum) return alert('MetaMask не установлен');
+        const accounts = await ethereum.request({ method: 'eth_requestAccounts' });
+        userAddress = accounts[0];
+        provider = new ethers.providers.Web3Provider(window.ethereum);
+        signer = provider.getSigner();
+        contract = new ethers.Contract(CONTRACT_ADDRESS, abi, signer);
+        document.getElementById('walletStatus').innerHTML = `✅ Подключён: ${userAddress.slice(0,6)}...${userAddress.slice(-4)}`;
+        const adminRole = await contract.DEFAULT_ADMIN_ROLE();
+        const isAdmin = await contract.hasRole(adminRole, userAddress);
+        if (!isAdmin) {
+            document.getElementById('contractStatus').innerHTML = '⚠️ У вас нет прав администратора.';
+            return;
+        }
+        document.getElementById('contractStatus').innerHTML = '✅ Контракт загружен. Вы администратор.';
+        document.getElementById('adminCard').style.display = 'block';
+        document.getElementById('initBtn').disabled = false;
+        const minBal = await contract.minBalance();
+        document.getElementById('minBalance').value = minBal.toString();
+    }
+    async function sendTx(action, params, successMsg, onSuccess) {
+        const txStatusDiv = document.getElementById('txStatus');
+        const txHashDiv = document.getElementById('txHash');
+        txStatusDiv.innerHTML = '⏳ Отправка...';
+        txHashDiv.innerHTML = 'Ожидание подписи...';
+        document.getElementById('txCard').style.display = 'block';
+        const tx = await action(...params);
+        txHashDiv.innerHTML = tx.hash;
+        txStatusDiv.innerHTML = '⏳ Отправлена. Ожидание подтверждения...';
+        const receipt = await tx.wait();
+        if (receipt.status === 1) {
+            txStatusDiv.innerHTML = `✅ ${successMsg} (блок ${receipt.blockNumber})`;
+            if (onSuccess) await onSuccess(receipt);
+        } else throw new Error('Транзакция не выполнена');
+    }
+    document.getElementById('connectBtn').onclick = init;
+    document.getElementById('initBtn').onclick = async () => {
+        const adminRole = await contract.DEFAULT_ADMIN_ROLE();
+        const isAdmin = await contract.hasRole(adminRole, userAddress);
+        if (!isAdmin) { document.getElementById('contractStatus').innerHTML = '⚠️ Нет прав администратора.'; return; }
+        document.getElementById('contractStatus').innerHTML = '✅ Контракт загружен. Вы администратор.';
+        document.getElementById('adminCard').style.display = 'block';
+        const minBal = await contract.minBalance();
+        document.getElementById('minBalance').value = minBal.toString();
+    };
+    document.getElementById('grantBtn').onclick = async () => {
+        const addr = document.getElementById('teacherAddr').value.trim();
+        if (!ethers.utils.isAddress(addr)) { document.getElementById('roleStatus').innerHTML = '❌ Некорректный адрес'; return; }
+        await sendTx(contract.grantTeacher, [addr], `Роль учителя выдана адресу ${addr}`);
+        document.getElementById('roleStatus').innerHTML = `✅ Роль выдана`;
+    };
+    document.getElementById('revokeBtn').onclick = async () => {
+        const addr = document.getElementById('teacherAddr').value.trim();
+        if (!ethers.utils.isAddress(addr)) { document.getElementById('roleStatus').innerHTML = '❌ Некорректный адрес'; return; }
+        await sendTx(contract.revokeTeacher, [addr], `Роль учителя отозвана у ${addr}`);
+        document.getElementById('roleStatus').innerHTML = `✅ Роль отозвана`;
+    };
+    document.getElementById('setBalanceBtn').onclick = async () => {
+        const minBalance = document.getElementById('minBalance').value.trim();
+        if (!minBalance || isNaN(parseInt(minBalance))) { document.getElementById('ruleStatus').innerHTML = '❌ Введите число'; return; }
+        await sendTx(contract.setMinBalance, [minBalance], `Минимальный баланс установлен: ${minBalance}`);
+        document.getElementById('ruleStatus').innerHTML = `✅ Правило обновлено`;
+    };
+    document.getElementById('forceDeactivateBtn').onclick = async () => {
+        const id = document.getElementById('forceId').value.trim();
+        if (!id) { document.getElementById('forceStatus').innerHTML = '❌ Введите ID курса'; return; }
+        await sendTx(contract.forceDeactivate, [id], `Курс ${id} принудительно деактивирован`);
+        document.getElementById('forceStatus').innerHTML = `✅ Курс деактивирован`;
+    };
+    if (window.ethereum) window.ethereum.on('accountsChanged', () => location.reload());
+</script>
+</body>
+</html>
