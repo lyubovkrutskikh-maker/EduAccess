@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EduAccess – Преподаватель</title>
+    <style>
+        * { box-sizing: border-box; }
+        body { font-family: system-ui, 'Segoe UI', Roboto, sans-serif; background: #f1f5f9; margin: 0; padding: 24px; color: #0f172a; }
+        .container { max-width: 1200px; margin: 0 auto; }
+        h1 { font-size: 1.8rem; }
+        .card { background: white; border-radius: 24px; padding: 20px 28px; margin-bottom: 28px; }
+        .card h2 { border-left: 5px solid #10b981; padding-left: 16px; }
+        .flex-row { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-end; margin-bottom: 16px; }
+        input, button { padding: 10px 14px; border-radius: 14px; border: 1px solid #cbd5e1; }
+        button { background: #10b981; color: white; border: none; cursor: pointer; }
+        button.danger { background: #ef4444; }
+        .status { background: #f1f5f9; padding: 12px; border-radius: 16px; font-family: monospace; margin-top: 12px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 16px; }
+        th, td { padding: 10px; border-bottom: 1px solid #e2e8f0; text-align: left; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>📚 Панель преподавателя</h1>
+    <div class="card">
+        <div class="flex-row">
+            <button id="connectBtn">🦊 Подключить кошелёк</button>
+            <button id="initBtn" disabled>📚 Загрузить мои курсы</button>
+        </div>
+        <div id="walletStatus" class="status">⚠️ Не подключён</div>
+        <div id="contractStatus" class="status"></div>
+    </div>
+    <div id="teacherCard" class="card" style="display:none;">
+        <div class="flex-row">
+            <div><label>Название</label><input id="title" placeholder="Курс"></div>
+            <div><label>Цена (wei)</label><input id="price" type="number" value="1000000000000000000"></div>
+            <div><label>Макс студентов (0=∞)</label><input id="max" type="number" value="0"></div>
+            <div><label>URI метаданных</label><input id="uri" placeholder="ipfs://test"></div>
+            <button id="createBtn">Создать курс</button>
+        </div>
+        <h2>Мои курсы</h2>
+        <div id="stats"></div>
+    </div>
+    <div id="txCard" class="card" style="display:none;">
+        <h2>Транзакция</h2>
+        <div id="txHash" class="mono status">—</div>
+        <div id="txStatus" class="status">—</div>
+    </div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
+<script>
+    const CONTRACT_ADDRESS = '0xE70b78Cbe587b7e099C1fC061C090Fced31AeCeb';
+    let provider, signer, contract, userAddress;
+    const abi = [
+        "function createCourse(string,uint256,uint256,string) returns (uint256)",
+        "function deactivateCourse(uint256)",
+        "function hasRole(bytes32,address) view returns (bool)",
+        "function TEACHER_ROLE() view returns (bytes32)",
+        "function nextCourseId() view returns (uint256)",
+        "function courseTitle(uint256) view returns (string)",
+        "function coursePrice(uint256) view returns (uint256)",
+        "function courseMaxStudents(uint256) view returns (uint256)",
+        "function courseEnrolled(uint256) view returns (uint256)",
+        "function courseActive(uint256) view returns (bool)",
+        "function courseTeacher(uint256) view returns (address)"
+    ];
+    async function init() {
+        if (!window.ethereum) return alert('MetaMask не найден');
+        const accounts = await ethereum.request({ method: 'eth_requestAccounts' });
+        userAddress = accounts[0];
+        provider = new ethers.providers.Web3Provider(window.ethereum);
+        signer = provider.getSigner();
+        contract = new ethers.Contract(CONTRACT_ADDRESS, abi, signer);
+        document.getElementById('walletStatus').innerHTML = `✅ Подключён: ${userAddress.slice(0,6)}...${userAddress.slice(-4)}`;
+        const teacherRole = await contract.TEACHER_ROLE();
+        const isTeacher = await contract.hasRole(teacherRole, userAddress);
+        if (!isTeacher) {
+            document.getElementById('contractStatus').innerHTML = '⚠️ У вас нет роли учителя. Обратитесь к админу.';
+            return;
+        }
+        document.getElementById('contractStatus').innerHTML = '✅ Контракт загружен. Вы преподаватель.';
+        document.getElementById('teacherCard').style.display = 'block';
+        await loadStats();
+        document.getElementById('initBtn').disabled = false;
+    }
+    async function loadStats() {
+        const total = await contract.nextCourseId();
+        let myCourses = [];
+        for (let i = 1; i < total; i++) {
+            const teacher = await contract.courseTeacher(i);
+            if (teacher.toLowerCase() === userAddress.toLowerCase()) {
+                const title = await contract.courseTitle(i);
+                const price = await contract.coursePrice(i);
+                const max = await contract.courseMaxStudents(i);
+                const enrolled = await contract.courseEnrolled(i);
+                const active = await contract.courseActive(i);
+                myCourses.push({ id: i, title, price, max, enrolled, active });
+            }
+        }
+        if (myCourses.length === 0) { 
+            document.getElementById('stats').innerHTML = '<p>У вас пока нет курсов. Создайте первый курс!</p>'; 
+            return; 
+        }
+        let html = `<table><thead><tr><th>ID</th><th>Название</th><th>Цена (wei)</th><th>Записано</th><th>Лимит</th><th>Активен</th><th>Действия</th></tr></thead><tbody>`;
+        for (let c of myCourses) {
+            html += `<tr>
+                <td>${c.id}</td>
+                <td>${c.title}</td>
+                <td>${c.price}</td>
+                <td>${c.enrolled}</td>
+                <td>${c.max===0?'∞':c.max}</td>
+                <td>${c.active?'Да':'Нет'}</td>
+                <td><button class="deactivate" data-id="${c.id}" ${!c.active ? 'disabled' : ''}>Деактивировать</button></td>
+            </tr>`;
+        }
+        html += `</tbody></table>`;
+        document.getElementById('stats').innerHTML = html;
+        document.querySelectorAll('.deactivate').forEach(btn => btn.onclick = async () => {
+            const id = btn.dataset.id;
+            if(confirm('Деактивировать курс?')) {
+                const tx = await contract.deactivateCourse(id);
+                document.getElementById('txHash').innerHTML = tx.hash;
+                document.getElementById('txCard').style.display = 'block';
+                await tx.wait();
+                await loadStats();
+            }
+        });
+    }
+    document.getElementById('connectBtn').onclick = init;
+    document.getElementById('initBtn').onclick = loadStats;
+    document.getElementById('createBtn').onclick = async () => {
+        const title = document.getElementById('title').value.trim();
+        const price = document.getElementById('price').value;
+        const max = document.getElementById('max').value;
+        const uri = document.getElementById('uri').value.trim();
+        if (!title || !uri) return alert('Заполните поля');
+        const before = await contract.nextCourseId();
+        const tx = await contract.createCourse(title, price, max, uri);
+        document.getElementById('txHash').innerHTML = tx.hash;
+        document.getElementById('txCard').style.display = 'block';
+        await tx.wait();
+        alert(`Курс создан! ID: ${before}`);
+        await loadStats();
+    };
+</script>
+</body>
+</html>
